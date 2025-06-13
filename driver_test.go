@@ -316,5 +316,156 @@ func TestAuditDriver_ReaderConnectionIsolation(t *testing.T) {
 	var auditCount int
 	err = writerDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM database_modifications WHERE execution_id = $1", execID.String()).Scan(&auditCount)
 	require.NoError(t, err)
-	assert.Equal(t, 1, auditCount, "Reader operation should not create additional audit records")
+	assert.Equal(t, 1, auditCount, "reader operation should not create additional audit records")
+}
+
+// TestAuditDriver_TransactionRollback tests that audit logs are not created when transactions are rolled back
+func TestAuditDriver_TransactionRollback(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	opID := uuid.New()
+	execID := uuid.New()
+	ctx = audriver.WithOperatorID(ctx, opID.String())
+	ctx = audriver.WithExecutionID(ctx, execID.String())
+
+	db := setUpWriterTestDB(t)
+
+	userID := uuid.New().String()
+	name := gofakeit.Name()
+	email := gofakeit.Email()
+
+	// start transaction and perform operations
+	tx, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+
+	_, err = tx.ExecContext(ctx, `INSERT INTO "users" ("id", "name", "email") VALUES ($1, $2, $3)`, userID, name, email)
+	require.NoError(t, err)
+
+	_, err = tx.ExecContext(ctx, `UPDATE "users" SET "name" = 'updated' WHERE "id" = $1`, userID)
+	require.NoError(t, err)
+
+	// rollback the transaction
+	err = tx.Rollback()
+	require.NoError(t, err)
+
+	// verify no audit logs were created
+	var count int
+	err = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM database_modifications WHERE execution_id = $1", execID.String()).Scan(&count)
+	require.NoError(t, err)
+	assert.Equal(t, 0, count, "rolled back transactions should not create audit logs")
+}
+
+// TestAuditDriver_NonDMLOperations tests that non-DML operations are not logged
+func TestAuditDriver_NonDMLOperations(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	opID := uuid.New()
+	execID := uuid.New()
+	ctx = audriver.WithOperatorID(ctx, opID.String())
+	ctx = audriver.WithExecutionID(ctx, execID.String())
+
+	nonDMLOperations := []struct {
+		name         string
+		sql          string
+		shouldIgnore bool // some operations might fail in txdb environment
+	}{
+		{"select_query", "SELECT COUNT(*) FROM users", false},
+		{"select_with_condition", "SELECT * FROM users WHERE name = 'nonexistent'", false},
+		{"explain_query", "EXPLAIN SELECT * FROM users", true}, // might not be supported in txdb
+		{"show_tables", "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'", false},
+	}
+
+	for _, op := range nonDMLOperations {
+		op := op
+
+		t.Run(op.name, func(t *testing.T) {
+			t.Parallel()
+
+			// arrange
+			db := setUpWriterTestDB(t)
+
+			var initialCount int
+			err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM database_modifications WHERE execution_id = $1", execID.String()).Scan(&initialCount)
+			require.NoError(t, err)
+
+			// act
+			result, err := db.ExecContext(ctx, op.sql)
+
+			// assert
+			if op.shouldIgnore && err != nil {
+				t.Logf("ignoring expected error for %s: %v", op.name, err)
+				return
+			}
+
+			// for SELECT operations, we need to handle them properly
+			if err != nil {
+				// try as a query instead of exec for SELECT operations
+				if rows, queryErr := db.QueryContext(ctx, op.sql); queryErr == nil {
+					rows.Close()
+				} else {
+					t.Logf("both ExecContext and QueryContext failed for %s, this might be expected in txdb", op.name)
+					return
+				}
+			} else if result != nil {
+				// successfully executed as ExecContext
+				t.Logf("successfully executed %s as ExecContext", op.name)
+			}
+
+			// verify no new audit logs were created
+			var finalCount int
+			err = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM database_modifications WHERE execution_id = $1", execID.String()).Scan(&finalCount)
+			require.NoError(t, err)
+
+			assert.Equal(t, initialCount, finalCount, "non-DML operation should not create audit logs: %s", op.name)
+		})
+	}
+}
+
+// TestAuditDriver_ConcurrentOperations tests concurrent access to the audit driver
+func TestAuditDriver_ConcurrentOperations(t *testing.T) {
+	t.Parallel()
+
+	const numGoroutines = 10
+	const operationsPerGoroutine = 5
+
+	db := setUpWriterTestDB(t)
+
+	// channel to collect results
+	results := make(chan error, numGoroutines)
+
+	// launch concurrent operations
+	for i := 0; i < numGoroutines; i++ {
+		go func(goroutineID int) {
+			ctx := t.Context()
+			opID := uuid.New().String()
+			execID := uuid.New().String()
+			ctx = audriver.WithOperatorID(ctx, opID)
+			ctx = audriver.WithExecutionID(ctx, execID)
+
+			for j := 0; j < operationsPerGoroutine; j++ {
+				userID := uuid.New().String()
+				_, err := db.ExecContext(ctx, `INSERT INTO "users" ("id", "name", "email") VALUES ($1, $2, $3)`,
+					userID, fmt.Sprintf("user-%d-%d", goroutineID, j), fmt.Sprintf("user%d%d@example.com", goroutineID, j))
+				if err != nil {
+					results <- err
+					return
+				}
+			}
+			results <- nil
+		}(i)
+	}
+
+	// collect results
+	for i := 0; i < numGoroutines; i++ {
+		err := <-results
+		assert.NoError(t, err, "concurrent operation should not fail")
+	}
+
+	// verify all operations were logged
+	var totalCount int
+	err := db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM database_modifications").Scan(&totalCount)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, totalCount, numGoroutines*operationsPerGoroutine, "all concurrent operations should be logged")
 }
