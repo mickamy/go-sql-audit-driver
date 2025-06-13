@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"regexp"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -63,20 +64,12 @@ func (b *databaseModificationBuilder) fillDefaults() {
 	}
 	if b.operatorIDExtractor == nil {
 		b.operatorIDExtractor = OperatorIDExtractorFunc(func(ctx context.Context) (string, error) {
-			operatorID, ok := ctx.Value("operator_id").(string)
-			if !ok || operatorID == "" {
-				return "", fmt.Errorf("operator ID not found in context")
-			}
-			return operatorID, nil
+			return GetOperatorID(ctx)
 		})
 	}
 	if b.executionIDExtractor == nil {
 		b.executionIDExtractor = ExecutionIDExtractorFunc(func(ctx context.Context) (string, error) {
-			executionID, ok := ctx.Value("execution_id").(string)
-			if !ok || executionID == "" {
-				return "", fmt.Errorf("execution ID not found in context")
-			}
-			return executionID, nil
+			return GetExecutionID(ctx)
 		})
 	}
 	if b.tableFilters == nil {
@@ -114,6 +107,7 @@ func (b *databaseModificationBuilder) build(ctx context.Context, sql string, arg
 		TableName:   ta.table,
 		Action:      ta.action,
 		SQL:         fullSQL,
+		ModifiedAt:  time.Now(),
 	}, nil
 }
 

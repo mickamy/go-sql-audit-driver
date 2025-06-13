@@ -40,9 +40,34 @@ type Driver struct {
 	builder *databaseModificationBuilder
 }
 
-func New(driver driver.Driver, options ...Option) *Driver {
+// NewDriver creates a new audit driver from a driver.Driver
+func NewDriver(d driver.Driver, options ...Option) driver.Driver {
+	return newAuditDriver(d, options...)
+}
+
+// NewConnector creates a new audit driver from a driver.Connector
+func NewConnector(c driver.Connector, options ...Option) driver.Driver {
+	return newAuditDriver(c.Driver(), options...)
+}
+
+func New(d interface{}, options ...Option) driver.Driver {
+	var baseDriver driver.Driver
+
+	switch v := d.(type) {
+	case driver.Driver:
+		baseDriver = v
+	case driver.Connector:
+		baseDriver = v.Driver() // これだけでOK
+	default:
+		panic("audriver.New: argument must be driver.Driver or driver.Connector")
+	}
+
+	return newAuditDriver(baseDriver, options...)
+}
+
+func newAuditDriver(d driver.Driver, options ...Option) driver.Driver {
 	drv := &Driver{
-		Driver:  driver,
+		Driver:  d,
 		builder: &databaseModificationBuilder{},
 	}
 

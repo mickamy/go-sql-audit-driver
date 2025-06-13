@@ -35,6 +35,6 @@ type DatabaseModification struct {
 	// SQL is the raw SQL query executed for the modification.
 	SQL string
 
-	// OperatedAt is the timestamp when the modification was performed.
-	OperatedAt time.Time
+	// ModifiedAt is the timestamp when the modification was performed.
+	ModifiedAt time.Time
 }

@@ -51,7 +51,7 @@ func (c *auditConn) ExecContext(ctx context.Context, query string, args []driver
 	}
 	if op != nil {
 		if err := c.logModification(ctx, *op); err != nil {
-			return nil, fmt.Errorf("failed to commitLogs database modification: %w", err)
+			return nil, fmt.Errorf("failed to log database modification: %w", err)
 		}
 	}
 
@@ -67,14 +67,15 @@ func (c *auditConn) logModification(ctx context.Context, op DatabaseModification
 
 	_, err := execCtx.ExecContext(
 		ctx,
-		`INSERT INTO database_modifications (id, operator_id, execution_id, resource_type, action, sql) VALUES ($1, $2, $3, $4, $5, $6)`,
+		`INSERT INTO database_modifications (id, operator_id, execution_id, table_name, action, sql, modified_at) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		[]driver.NamedValue{
 			{Name: "id", Value: op.ID},
 			{Name: "operator_id", Value: op.OperatorID},
 			{Name: "execution_id", Value: op.ExecutionID},
-			{Name: "resource_type", Value: op.TableName},
+			{Name: "table_name", Value: op.TableName},
 			{Name: "action", Value: op.Action.String()},
 			{Name: "sql", Value: op.SQL},
+			{Name: "modified_at", Value: op.ModifiedAt},
 		},
 	)
 
@@ -172,8 +173,8 @@ func (tx *loggingTx) log(modifications []DatabaseModification) error {
 
 	for i, op := range modifications {
 		baseIndex := i * 6
-		valuesClauses[i] = fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d)",
-			baseIndex+1, baseIndex+2, baseIndex+3, baseIndex+4, baseIndex+5, baseIndex+6)
+		valuesClauses[i] = fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d, $%d)",
+			baseIndex+1, baseIndex+2, baseIndex+3, baseIndex+4, baseIndex+5, baseIndex+6, baseIndex+7)
 
 		args = append(args,
 			driver.NamedValue{Ordinal: baseIndex + 1, Value: op.ID},
@@ -182,11 +183,12 @@ func (tx *loggingTx) log(modifications []DatabaseModification) error {
 			driver.NamedValue{Ordinal: baseIndex + 4, Value: op.TableName},
 			driver.NamedValue{Ordinal: baseIndex + 5, Value: op.Action.String()},
 			driver.NamedValue{Ordinal: baseIndex + 6, Value: op.SQL},
+			driver.NamedValue{Ordinal: baseIndex + 7, Value: op.ModifiedAt},
 		)
 	}
 
 	query := fmt.Sprintf(
-		`INSERT INTO database_modifications (id, operator_id, execution_id, resource_type, action, sql) VALUES %s`,
+		`INSERT INTO database_modifications (id, operator_id, execution_id, table_name, action, sql, modified_at) VALUES %s`,
 		strings.Join(valuesClauses, ", "),
 	)
 
