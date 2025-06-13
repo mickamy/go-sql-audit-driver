@@ -6,41 +6,16 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/DATA-DOG/go-txdb"
 	"github.com/brianvoe/gofakeit/v7"
 	"github.com/google/uuid"
-	_ "github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/mickamy/audriver"
 )
 
-func init() {
-	txdb.Register("txdb", "postgres", writerDSN)
-}
-
-func setUpTestDB(t *testing.T) *sql.DB {
-	t.Helper()
-
-	driverName := fmt.Sprintf("test_%s_%d", t.Name(), gofakeit.Number(1000, 9999))
-
-	baseDriver := txdb.New("postgres", writerDSN)
-	auditDriver := audriver.New(baseDriver)
-
-	sql.Register(driverName, auditDriver)
-
-	db, err := sql.Open(driverName, driverName)
-	require.NoError(t, err)
-
-	t.Cleanup(func() {
-		_ = db.Close()
-	})
-
-	return db
-}
-
-func Test_WithoutTransaction(t *testing.T) {
+// TestAuditDriver_DirectExecution tests audit logging for direct SQL execution (non-transactional)
+func TestAuditDriver_DirectExecution(t *testing.T) {
 	t.Parallel()
 
 	ctx := t.Context()
@@ -53,100 +28,101 @@ func Test_WithoutTransaction(t *testing.T) {
 	name := gofakeit.Name()
 	email := gofakeit.Email()
 
-	tcs := []struct {
-		name          string
-		operate       func(ctx context.Context, writer *sql.DB)
-		wantTableName string
-		wantAction    audriver.DatabaseModificationAction
-		wantSQL       string
+	testCases := []struct {
+		name           string
+		operation      func(ctx context.Context, db *sql.DB)
+		expectedTable  string
+		expectedAction audriver.DatabaseModificationAction
+		expectedSQL    string
 	}{
 		{
-			name: "insert",
-			operate: func(ctx context.Context, writer *sql.DB) {
-				_, err := writer.ExecContext(ctx, `INSERT INTO "users" ("id", "name", "email") VALUES ($1, $2, $3)`, userID, name, email)
+			name: "insert_operation",
+			operation: func(ctx context.Context, db *sql.DB) {
+				_, err := db.ExecContext(ctx, `INSERT INTO "users" ("id", "name", "email") VALUES ($1, $2, $3)`, userID, name, email)
 				require.NoError(t, err)
 			},
-			wantTableName: "users",
-			wantAction:    audriver.DatabaseModificationActionInsert,
-			wantSQL:       fmt.Sprintf(`INSERT INTO "users" ("id", "name", "email") VALUES ('%s', '%s', '%s')`, userID, name, email),
+			expectedTable:  "users",
+			expectedAction: audriver.DatabaseModificationActionInsert,
+			expectedSQL:    fmt.Sprintf(`INSERT INTO "users" ("id", "name", "email") VALUES ('%s', '%s', '%s')`, userID, name, email),
 		},
 		{
-			name: "select",
-			operate: func(ctx context.Context, writer *sql.DB) {
-				_, err := writer.ExecContext(ctx, `INSERT INTO "users" ("id", "name", "email") VALUES ($1, $2, $3)`, userID, name, email)
+			name: "select_after_insert",
+			operation: func(ctx context.Context, db *sql.DB) {
+				_, err := db.ExecContext(ctx, `INSERT INTO "users" ("id", "name", "email") VALUES ($1, $2, $3)`, userID, name, email)
 				require.NoError(t, err)
-				rows, err := writer.QueryContext(ctx, `SELECT * FROM "users" WHERE "id" = $1`, userID)
+				rows, err := db.QueryContext(ctx, `SELECT * FROM "users" WHERE "id" = $1`, userID)
 				require.NoError(t, err)
 				defer func(rows *sql.Rows) {
 					_ = rows.Close()
 				}(rows)
 			},
-			wantTableName: "users",
-			wantAction:    audriver.DatabaseModificationActionInsert,
-			wantSQL:       fmt.Sprintf(`INSERT INTO "users" ("id", "name", "email") VALUES ('%s', '%s', '%s')`, userID, name, email),
+			expectedTable:  "users",
+			expectedAction: audriver.DatabaseModificationActionInsert,
+			expectedSQL:    fmt.Sprintf(`INSERT INTO "users" ("id", "name", "email") VALUES ('%s', '%s', '%s')`, userID, name, email),
 		},
 		{
-			name: "update",
-			operate: func(ctx context.Context, writer *sql.DB) {
-				_, err := writer.ExecContext(ctx, `INSERT INTO "users" ("id", "name", "email") VALUES ($1, $2, $3)`, userID, name, email)
+			name: "update_operation",
+			operation: func(ctx context.Context, db *sql.DB) {
+				_, err := db.ExecContext(ctx, `INSERT INTO "users" ("id", "name", "email") VALUES ($1, $2, $3)`, userID, name, email)
 				require.NoError(t, err)
-				_, err = writer.ExecContext(ctx, `UPDATE "users" SET "name" = 'updated_test_user' WHERE "id" = $1`, userID)
+				_, err = db.ExecContext(ctx, `UPDATE "users" SET "name" = 'updated_test_user' WHERE "id" = $1`, userID)
 				require.NoError(t, err)
 			},
-			wantTableName: "users",
-			wantAction:    audriver.DatabaseModificationActionUpdate,
-			wantSQL:       fmt.Sprintf(`UPDATE "users" SET "name" = 'updated_test_user' WHERE "id" = '%s'`, userID),
+			expectedTable:  "users",
+			expectedAction: audriver.DatabaseModificationActionUpdate,
+			expectedSQL:    fmt.Sprintf(`UPDATE "users" SET "name" = 'updated_test_user' WHERE "id" = '%s'`, userID),
 		},
 		{
-			name: "delete",
-			operate: func(ctx context.Context, writer *sql.DB) {
-				_, err := writer.ExecContext(ctx, `INSERT INTO "users" ("id", "name", "email") VALUES ($1, $2, $3)`, userID, name, email)
+			name: "delete_operation",
+			operation: func(ctx context.Context, db *sql.DB) {
+				_, err := db.ExecContext(ctx, `INSERT INTO "users" ("id", "name", "email") VALUES ($1, $2, $3)`, userID, name, email)
 				require.NoError(t, err)
-				_, err = writer.ExecContext(ctx, `DELETE FROM "users" WHERE "id" = $1`, userID)
+				_, err = db.ExecContext(ctx, `DELETE FROM "users" WHERE "id" = $1`, userID)
 				require.NoError(t, err)
 			},
-			wantTableName: "users",
-			wantAction:    audriver.DatabaseModificationActionDelete,
-			wantSQL:       fmt.Sprintf(`DELETE FROM "users" WHERE "id" = '%s'`, userID),
+			expectedTable:  "users",
+			expectedAction: audriver.DatabaseModificationActionDelete,
+			expectedSQL:    fmt.Sprintf(`DELETE FROM "users" WHERE "id" = '%s'`, userID),
 		},
 	}
 
-	for _, tc := range tcs {
+	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
 			// arrange
-			db := setUpTestDB(t)
+			db := setUpWriterTestDB(t)
 
 			// act
-			tc.operate(ctx, db)
+			tc.operation(ctx, db)
 
 			// assert
-			var m audriver.DatabaseModification
+			var audit audriver.DatabaseModification
 			row := db.QueryRowContext(ctx, "SELECT id, operator_id, execution_id, table_name, action, sql, modified_at FROM database_modifications ORDER BY modified_at DESC LIMIT 1")
 			err := row.Scan(
-				&m.ID,
-				&m.OperatorID,
-				&m.ExecutionID,
-				&m.TableName,
-				&m.Action,
-				&m.SQL,
-				&m.ModifiedAt,
+				&audit.ID,
+				&audit.OperatorID,
+				&audit.ExecutionID,
+				&audit.TableName,
+				&audit.Action,
+				&audit.SQL,
+				&audit.ModifiedAt,
 			)
 			require.NoError(t, err)
 
-			assert.Equal(t, opID.String(), m.OperatorID)
-			assert.Equal(t, execID.String(), m.ExecutionID)
-			assert.Equal(t, tc.wantTableName, m.TableName)
-			assert.Equal(t, tc.wantAction, m.Action)
-			assert.Equal(t, tc.wantSQL, m.SQL)
-			assert.NotZero(t, m.ModifiedAt)
+			assert.Equal(t, opID.String(), audit.OperatorID)
+			assert.Equal(t, execID.String(), audit.ExecutionID)
+			assert.Equal(t, tc.expectedTable, audit.TableName)
+			assert.Equal(t, tc.expectedAction, audit.Action)
+			assert.Equal(t, tc.expectedSQL, audit.SQL)
+			assert.NotZero(t, audit.ModifiedAt)
 		})
 	}
 }
 
-func Test_WithTransaction(t *testing.T) {
+// TestAuditDriver_TransactionalExecution tests audit logging for transactional SQL execution
+func TestAuditDriver_TransactionalExecution(t *testing.T) {
 	t.Parallel()
 
 	ctx := t.Context()
@@ -157,17 +133,18 @@ func Test_WithTransaction(t *testing.T) {
 	userID := uuid.New().String()
 	name := gofakeit.Name()
 	email := gofakeit.Email()
-	tcs := []struct {
-		name          string
-		operate       func(ctx context.Context, writer *sql.DB)
-		wantTableName string
-		wantAction    audriver.DatabaseModificationAction
-		wantSQL       string
+
+	testCases := []struct {
+		name           string
+		operation      func(ctx context.Context, db *sql.DB)
+		expectedTable  string
+		expectedAction audriver.DatabaseModificationAction
+		expectedSQL    string
 	}{
 		{
-			name: "insert",
-			operate: func(ctx context.Context, writer *sql.DB) {
-				tx, err := writer.BeginTx(ctx, nil)
+			name: "transactional_insert",
+			operation: func(ctx context.Context, db *sql.DB) {
+				tx, err := db.BeginTx(ctx, nil)
 				require.NoError(t, err)
 
 				_, err = tx.ExecContext(ctx, `INSERT INTO "users" ("id", "name", "email") VALUES ($1, $2, $3)`, userID, name, email)
@@ -176,14 +153,14 @@ func Test_WithTransaction(t *testing.T) {
 				err = tx.Commit()
 				require.NoError(t, err)
 			},
-			wantTableName: "users",
-			wantAction:    audriver.DatabaseModificationActionInsert,
-			wantSQL:       fmt.Sprintf(`INSERT INTO "users" ("id", "name", "email") VALUES ('%s', '%s', '%s')`, userID, name, email),
+			expectedTable:  "users",
+			expectedAction: audriver.DatabaseModificationActionInsert,
+			expectedSQL:    fmt.Sprintf(`INSERT INTO "users" ("id", "name", "email") VALUES ('%s', '%s', '%s')`, userID, name, email),
 		},
 		{
-			name: "select",
-			operate: func(ctx context.Context, writer *sql.DB) {
-				tx, err := writer.BeginTx(ctx, nil)
+			name: "transactional_select_after_insert",
+			operation: func(ctx context.Context, db *sql.DB) {
+				tx, err := db.BeginTx(ctx, nil)
 				require.NoError(t, err)
 
 				_, err = tx.ExecContext(ctx, `INSERT INTO "users" ("id", "name", "email") VALUES ($1, $2, $3)`, userID, name, email)
@@ -198,14 +175,14 @@ func Test_WithTransaction(t *testing.T) {
 				err = tx.Commit()
 				require.NoError(t, err)
 			},
-			wantTableName: "users",
-			wantAction:    audriver.DatabaseModificationActionInsert,
-			wantSQL:       fmt.Sprintf(`INSERT INTO "users" ("id", "name", "email") VALUES ('%s', '%s', '%s')`, userID, name, email),
+			expectedTable:  "users",
+			expectedAction: audriver.DatabaseModificationActionInsert,
+			expectedSQL:    fmt.Sprintf(`INSERT INTO "users" ("id", "name", "email") VALUES ('%s', '%s', '%s')`, userID, name, email),
 		},
 		{
-			name: "update",
-			operate: func(ctx context.Context, writer *sql.DB) {
-				tx, err := writer.BeginTx(ctx, nil)
+			name: "transactional_update",
+			operation: func(ctx context.Context, db *sql.DB) {
+				tx, err := db.BeginTx(ctx, nil)
 				require.NoError(t, err)
 
 				_, err = tx.ExecContext(ctx, `INSERT INTO "users" ("id", "name", "email") VALUES ($1, $2, $3)`, userID, name, email)
@@ -217,14 +194,14 @@ func Test_WithTransaction(t *testing.T) {
 				err = tx.Commit()
 				require.NoError(t, err)
 			},
-			wantTableName: "users",
-			wantAction:    audriver.DatabaseModificationActionUpdate,
-			wantSQL:       fmt.Sprintf(`UPDATE "users" SET "name" = 'updated_test_user' WHERE "id" = '%s'`, userID),
+			expectedTable:  "users",
+			expectedAction: audriver.DatabaseModificationActionUpdate,
+			expectedSQL:    fmt.Sprintf(`UPDATE "users" SET "name" = 'updated_test_user' WHERE "id" = '%s'`, userID),
 		},
 		{
-			name: "delete",
-			operate: func(ctx context.Context, writer *sql.DB) {
-				tx, err := writer.BeginTx(ctx, nil)
+			name: "transactional_delete",
+			operation: func(ctx context.Context, db *sql.DB) {
+				tx, err := db.BeginTx(ctx, nil)
 				require.NoError(t, err)
 
 				_, err = tx.ExecContext(ctx, `INSERT INTO "users" ("id", "name", "email") VALUES ($1, $2, $3)`, userID, name, email)
@@ -236,43 +213,108 @@ func Test_WithTransaction(t *testing.T) {
 				err = tx.Commit()
 				require.NoError(t, err)
 			},
-			wantTableName: "users",
-			wantAction:    audriver.DatabaseModificationActionDelete,
-			wantSQL:       fmt.Sprintf(`DELETE FROM "users" WHERE "id" = '%s'`, userID),
+			expectedTable:  "users",
+			expectedAction: audriver.DatabaseModificationActionDelete,
+			expectedSQL:    fmt.Sprintf(`DELETE FROM "users" WHERE "id" = '%s'`, userID),
 		},
 	}
 
-	for _, tc := range tcs {
+	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
 			// arrange
-			db := setUpTestDB(t)
+			db := setUpWriterTestDB(t)
 
 			// act
-			tc.operate(ctx, db)
+			tc.operation(ctx, db)
 
 			// assert
-			var m audriver.DatabaseModification
+			var audit audriver.DatabaseModification
 			row := db.QueryRowContext(ctx, "SELECT id, operator_id, execution_id, table_name, action, sql, modified_at FROM database_modifications ORDER BY modified_at DESC LIMIT 1")
 			err := row.Scan(
-				&m.ID,
-				&m.OperatorID,
-				&m.ExecutionID,
-				&m.TableName,
-				&m.Action,
-				&m.SQL,
-				&m.ModifiedAt,
+				&audit.ID,
+				&audit.OperatorID,
+				&audit.ExecutionID,
+				&audit.TableName,
+				&audit.Action,
+				&audit.SQL,
+				&audit.ModifiedAt,
 			)
 			require.NoError(t, err)
 
-			assert.Equal(t, opID.String(), m.OperatorID)
-			assert.Equal(t, execID.String(), m.ExecutionID)
-			assert.Equal(t, tc.wantTableName, m.TableName)
-			assert.Equal(t, tc.wantAction, m.Action)
-			assert.Equal(t, tc.wantSQL, m.SQL)
-			assert.NotZero(t, m.ModifiedAt)
+			assert.Equal(t, opID.String(), audit.OperatorID)
+			assert.Equal(t, execID.String(), audit.ExecutionID)
+			assert.Equal(t, tc.expectedTable, audit.TableName)
+			assert.Equal(t, tc.expectedAction, audit.Action)
+			assert.Equal(t, tc.expectedSQL, audit.SQL)
+			assert.NotZero(t, audit.ModifiedAt)
 		})
 	}
+}
+
+// TestAuditDriver_ReaderConnectionIsolation tests that reader connections do not interfere with audit logging
+func TestAuditDriver_ReaderConnectionIsolation(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	opID := uuid.New()
+	execID := uuid.New()
+	ctx = audriver.WithOperatorID(ctx, opID.String())
+	ctx = audriver.WithExecutionID(ctx, execID.String())
+
+	userID := uuid.New().String()
+	name := gofakeit.Name()
+	email := gofakeit.Email()
+
+	writerDB := setUpWriterTestDB(t)
+
+	// arrange - perform write operation
+	tx, err := writerDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+
+	_, err = tx.ExecContext(ctx, `INSERT INTO "users" ("id", "name", "email") VALUES ($1, $2, $3)`, userID, name, email)
+	require.NoError(t, err)
+
+	err = tx.Commit()
+	require.NoError(t, err)
+
+	// act - read using reader connection
+	readerDB := setUpReaderTestDB(t)
+	rows, err := readerDB.QueryContext(ctx, `SELECT * FROM "users" WHERE "id" = $1`, userID)
+	require.NoError(t, err)
+	defer func(rows *sql.Rows) {
+		_ = rows.Close()
+	}(rows)
+
+	// assert - verify only the write operation was audited, not the read
+	var audit audriver.DatabaseModification
+	row := writerDB.QueryRowContext(ctx, "SELECT id, operator_id, execution_id, table_name, action, sql, modified_at FROM database_modifications ORDER BY modified_at DESC LIMIT 1")
+	err = row.Scan(
+		&audit.ID,
+		&audit.OperatorID,
+		&audit.ExecutionID,
+		&audit.TableName,
+		&audit.Action,
+		&audit.SQL,
+		&audit.ModifiedAt,
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, opID.String(), audit.OperatorID)
+	assert.Equal(t, execID.String(), audit.ExecutionID)
+	assert.Equal(t, "users", audit.TableName)
+	assert.Equal(t, audriver.DatabaseModificationActionInsert, audit.Action)
+	assert.Equal(t,
+		fmt.Sprintf(`INSERT INTO "users" ("id", "name", "email") VALUES ('%s', '%s', '%s')`, userID, name, email),
+		audit.SQL,
+	)
+	assert.NotZero(t, audit.ModifiedAt)
+
+	// verify that the reader operation created no additional audit records
+	var auditCount int
+	err = writerDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM database_modifications WHERE execution_id = $1", execID.String()).Scan(&auditCount)
+	require.NoError(t, err)
+	assert.Equal(t, 1, auditCount, "Reader operation should not create additional audit records")
 }
