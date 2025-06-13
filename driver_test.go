@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/mickamy/audriver/audriver"
+	"github.com/mickamy/audriver"
 )
 
 func init() {
