@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/mickamy/audriver/internal/formatter"
+	"github.com/mickamy/go-sql-audit-driver/internal/formatter"
 )
 
 var (

@@ -1,4 +1,4 @@
-module github.com/mickamy/audriver
+module github.com/mickamy/go-sql-audit-driver
 
 go 1.24.4
 

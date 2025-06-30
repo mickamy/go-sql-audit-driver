@@ -30,7 +30,7 @@ import (
 	"context"
 
 	"github.com/lib/pq"
-	"github.com/mickamy/audriver"
+	"github.com/mickamy/go-sql-audit-driver/audriver"
 )
 
 func main() {
