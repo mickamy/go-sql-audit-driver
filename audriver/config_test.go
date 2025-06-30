@@ -10,7 +10,7 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/stretchr/testify/require"
 
-	"github.com/mickamy/audriver"
+	"github.com/mickamy/go-sql-audit-driver/audriver"
 )
 
 const (

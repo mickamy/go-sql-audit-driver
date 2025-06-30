@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/mickamy/audriver"
+	"github.com/mickamy/go-sql-audit-driver/audriver"
 )
 
 // TestAuditDriver_TableFilters tests table filtering functionality
