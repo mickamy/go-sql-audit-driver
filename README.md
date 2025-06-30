@@ -15,7 +15,7 @@ INSERT, UPDATE, DELETE operations) without requiring changes to your existing ap
 ## Installation
 
 ```bash
-go get github.com/mickamy/audriver
+go get github.com/mickamy/go-sql-audit-driver
 ```
 
 ## Quick Start
