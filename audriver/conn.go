@@ -5,15 +5,17 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"log"
+	"os"
 	"strings"
 )
 
-type auditConn struct {
+type Conn struct {
 	driver.Conn
 	builder *databaseModificationBuilder
 }
 
-func (c *auditConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
+func (c *Conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
 	conn, ok := c.Conn.(driver.ConnBeginTx)
 	if !ok {
 		return nil, errors.New("connection does not support BeginTx")
@@ -29,8 +31,9 @@ func (c *auditConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.
 	return &loggingTx{
 		Tx: tx,
 		conn: &txConn{
-			Conn: c.Conn,
-			buf:  buf,
+			Conn:    c.Conn,
+			buf:     buf,
+			builder: c.builder,
 		},
 		buf: buf,
 	}, nil
@@ -38,7 +41,7 @@ func (c *auditConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.
 
 // ExecContext implements the ExecContext method for the audit connection.
 // It logs database modifications if the SQL statement is a modifying statement.
-func (c *auditConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
+func (c *Conn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	execCtx, ok := c.Conn.(driver.ExecerContext)
 	if !ok {
 		return nil, errors.New("connection does not support ExecContext")
@@ -59,7 +62,7 @@ func (c *auditConn) ExecContext(ctx context.Context, query string, args []driver
 }
 
 // logModification inserts a single database modification commitLogs directly into the database.
-func (c *auditConn) logModification(ctx context.Context, op DatabaseModification) error {
+func (c *Conn) logModification(ctx context.Context, op DatabaseModification) error {
 	execCtx, ok := c.Conn.(driver.ExecerContext)
 	if !ok {
 		return errors.New("connection does not support ExecContext for direct logging")
@@ -169,7 +172,7 @@ func (tx *loggingTx) log(modifications []DatabaseModification) error {
 	}
 
 	valuesClauses := make([]string, len(modifications))
-	args := make([]driver.NamedValue, 0, len(modifications)*6)
+	args := make([]driver.NamedValue, 0, len(modifications)*7)
 
 	for i, op := range modifications {
 		baseIndex := i * 6
@@ -201,9 +204,9 @@ func (tx *loggingTx) log(modifications []DatabaseModification) error {
 }
 
 var (
-	_ driver.Conn          = (*auditConn)(nil)
-	_ driver.ConnBeginTx   = (*auditConn)(nil)
-	_ driver.ExecerContext = (*auditConn)(nil)
+	_ driver.Conn          = (*Conn)(nil)
+	_ driver.ConnBeginTx   = (*Conn)(nil)
+	_ driver.ExecerContext = (*Conn)(nil)
 
 	_ driver.ConnPrepareContext = (*txConn)(nil)
 	_ driver.ExecerContext      = (*txConn)(nil)

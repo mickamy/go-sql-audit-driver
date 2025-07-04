@@ -57,7 +57,7 @@ func New(d interface{}, options ...Option) driver.Driver {
 	case driver.Driver:
 		baseDriver = v
 	case driver.Connector:
-		baseDriver = v.Driver() // これだけでOK
+		baseDriver = v.Driver()
 	default:
 		panic("audriver.New: argument must be driver.Driver or driver.Connector")
 	}
@@ -85,7 +85,7 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &auditConn{Conn: conn, builder: d.builder}, nil
+	return &Conn{Conn: conn, builder: d.builder}, nil
 }
 
 var (
