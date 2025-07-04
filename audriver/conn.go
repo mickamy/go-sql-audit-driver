@@ -5,8 +5,6 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
-	"log"
-	"os"
 	"strings"
 )
 
