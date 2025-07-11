@@ -33,11 +33,18 @@ func WithTableFilters(filters ...TableFilter) Option {
 	}
 }
 
+func WithReadOnly(readOnly bool) Option {
+	return func(d *Driver) {
+		d.readOnly = readOnly
+	}
+}
+
 // Driver is a wrapper around a standard SQL driver that logs database modifications.
 // It implements the driver.Driver interface and provides additional functionality for auditing.
 type Driver struct {
 	driver.Driver
-	builder *databaseModificationBuilder
+	builder  *databaseModificationBuilder
+	readOnly bool
 }
 
 // NewDriver creates a new audit driver from a driver.Driver
@@ -85,7 +92,7 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Conn{Conn: conn, builder: d.builder}, nil
+	return &Conn{Conn: conn, builder: d.builder, readOnly: d.readOnly}, nil
 }
 
 var (

@@ -10,10 +10,12 @@ import (
 
 type Conn struct {
 	driver.Conn
-	builder *databaseModificationBuilder
+	builder  *databaseModificationBuilder
+	readOnly bool
 }
 
 func (c *Conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
+	opts.ReadOnly = c.readOnly
 	conn, ok := c.Conn.(driver.ConnBeginTx)
 	if !ok {
 		return nil, errors.New("connection does not support BeginTx")
@@ -29,9 +31,10 @@ func (c *Conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, e
 	return &loggingTx{
 		Tx: tx,
 		conn: &txConn{
-			Conn:    c.Conn,
-			buf:     buf,
-			builder: c.builder,
+			Conn:     c.Conn,
+			buf:      buf,
+			builder:  c.builder,
+			readOnly: c.readOnly,
 		},
 		buf: buf,
 	}, nil
@@ -43,6 +46,10 @@ func (c *Conn) ExecContext(ctx context.Context, query string, args []driver.Name
 	execCtx, ok := c.Conn.(driver.ExecerContext)
 	if !ok {
 		return nil, errors.New("connection does not support ExecContext")
+	}
+
+	if c.readOnly {
+		return execCtx.ExecContext(ctx, query, args)
 	}
 
 	// modifying SQL statements outside of transactions are logged directly
@@ -87,8 +94,9 @@ func (c *Conn) logModification(ctx context.Context, op DatabaseModification) err
 // It implements the driver.Conn interface and provides methods for executing SQL statements within a transaction.
 type txConn struct {
 	driver.Conn
-	buf     *buffer
-	builder *databaseModificationBuilder
+	buf      *buffer
+	builder  *databaseModificationBuilder
+	readOnly bool
 }
 
 // ExecContext executes SQL statements within a transaction.
@@ -97,6 +105,10 @@ func (tc *txConn) ExecContext(ctx context.Context, query string, args []driver.N
 	execCtx, ok := tc.Conn.(driver.ExecerContext)
 	if !ok {
 		return nil, errors.New("connection does not support ExecContext")
+	}
+
+	if tc.readOnly {
+		return execCtx.ExecContext(ctx, query, args)
 	}
 
 	op, err := tc.builder.build(ctx, query, args)
