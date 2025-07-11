@@ -4,10 +4,10 @@ import (
 	"context"
 	"database/sql/driver"
 	"fmt"
-	"regexp"
 	"time"
 
 	"github.com/google/uuid"
+	pg_query "github.com/pganalyze/pg_query_go/v6"
 
 	"github.com/mickamy/go-sql-audit-driver/internal/postgres"
 )
@@ -115,10 +115,22 @@ func (b *databaseModificationBuilder) isFiltered(tableName string) bool {
 	return b.tableFilters.ShouldLog(tableName)
 }
 
-var (
-	dmlRegexp = regexp.MustCompile(`(?i)^\s*(INSERT|UPDATE|DELETE)\b`)
-)
-
 func isDML(sql string) bool {
-	return dmlRegexp.MatchString(sql)
+	tree, err := pg_query.Parse(sql)
+	if err != nil {
+		return false
+	}
+	if len(tree.Stmts) == 0 {
+		return false
+	}
+	for _, stmt := range tree.Stmts {
+		switch stmt.Stmt.Node.(type) {
+		case *pg_query.Node_InsertStmt,
+			*pg_query.Node_UpdateStmt,
+			*pg_query.Node_DeleteStmt:
+			return true
+		}
+	}
+
+	return false
 }
