@@ -66,7 +66,7 @@ func (c *Conn) ExecContext(ctx context.Context, query string, args []driver.Name
 	return execCtx.ExecContext(ctx, query, args)
 }
 
-// logModification inserts a single database modification commitLogs directly into the database.
+// logModification inserts a single database modification directly into the database.
 func (c *Conn) logModification(ctx context.Context, op DatabaseModification) error {
 	execCtx, ok := c.Conn.(driver.ExecerContext)
 	if !ok {
@@ -91,7 +91,6 @@ func (c *Conn) logModification(ctx context.Context, op DatabaseModification) err
 }
 
 // txConn is a wrapper around driver.Conn that provides transaction support and logs database modifications.
-// It implements the driver.Conn interface and provides methods for executing SQL statements within a transaction.
 type txConn struct {
 	driver.Conn
 	buf      *buffer
@@ -116,13 +115,18 @@ func (tc *txConn) ExecContext(ctx context.Context, query string, args []driver.N
 		return nil, fmt.Errorf("failed to build database modification: %w", err)
 	}
 
+	res, err := execCtx.ExecContext(ctx, query, args)
+	if err != nil {
+		return res, err
+	}
 	if op != nil {
 		tc.buf.add(*op)
 	}
 
-	return execCtx.ExecContext(ctx, query, args)
+	return res, nil
 }
 
+// QueryContext executes read-only queries within a transaction.
 func (tc *txConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
 	queryCtx, ok := tc.Conn.(driver.QueryerContext)
 	if !ok {
@@ -152,7 +156,6 @@ func (tx *loggingTx) Commit() error {
 	modifications := tx.buf.drain()
 	if len(modifications) > 0 {
 		if err := tx.log(modifications); err != nil {
-			// roll back the transaction if flushing logs fails
 			rollbackErr := tx.Rollback()
 			if rollbackErr != nil {
 				return fmt.Errorf("failed to rollback transaction after logging error: %w: %w", rollbackErr, err)
@@ -164,7 +167,7 @@ func (tx *loggingTx) Commit() error {
 	return tx.Tx.Commit()
 }
 
-// Rollback rolls back the transaction and flushes the buffer.
+// Rollback rolls back the transaction and drains the buffer.
 func (tx *loggingTx) Rollback() error {
 	_ = tx.buf.drain()
 	return tx.Tx.Rollback()
@@ -185,7 +188,7 @@ func (tx *loggingTx) log(modifications []DatabaseModification) error {
 	args := make([]driver.NamedValue, 0, len(modifications)*7)
 
 	for i, op := range modifications {
-		baseIndex := i * 6
+		baseIndex := i * 7
 		valuesClauses[i] = fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d, $%d)",
 			baseIndex+1, baseIndex+2, baseIndex+3, baseIndex+4, baseIndex+5, baseIndex+6, baseIndex+7)
 
