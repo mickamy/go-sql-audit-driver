@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql/driver"
 	"fmt"
-	"regexp"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -117,20 +115,7 @@ func (b *databaseModificationBuilder) isFiltered(tableName string) bool {
 	return b.tableFilters.ShouldLog(tableName)
 }
 
-var (
-	quickDMLRegexp = regexp.MustCompile(`(?i)^\s*(?:INSERT|UPDATE|DELETE)\b`)
-)
-
 func isDML(sql string) bool {
-	normalized := stripLeading(sql)
-	if normalized == "" {
-		return false
-	}
-
-	if !quickDMLRegexp.MatchString(normalized) {
-		return false
-	}
-
 	tree, err := pg_query.Parse(sql)
 	if err != nil {
 		return false
@@ -148,34 +133,4 @@ func isDML(sql string) bool {
 	}
 
 	return false
-}
-
-// stripLeading removes leading whitespace, comments, and simple WITH-CTE from the SQL string.
-func stripLeading(sql string) string {
-	s := strings.TrimLeft(sql, " \t\r\n")
-
-	// -- comment
-	for strings.HasPrefix(s, "--") {
-		if idx := strings.Index(s, "\n"); idx >= 0 {
-			s = s[idx+1:]
-		} else {
-			return ""
-		}
-		s = strings.TrimLeft(s, " \t\r\n")
-	}
-
-	// /* */ comment
-	for strings.HasPrefix(s, "/*") {
-		if idx := strings.Index(s[2:], "*/"); idx >= 0 {
-			s = s[idx+4:]
-		} else {
-			return ""
-		}
-		s = strings.TrimLeft(s, " \t\r\n")
-	}
-
-	// remove simple WITH-CTE
-	withCTE := regexp.MustCompile(`(?is)^\s*WITH\s+[^;]+?\)\s*`)
-	s = withCTE.ReplaceAllString(s, "")
-	return s
 }
