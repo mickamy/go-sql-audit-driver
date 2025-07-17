@@ -53,12 +53,12 @@ func (c *Conn) ExecContext(ctx context.Context, query string, args []driver.Name
 	}
 
 	// modifying SQL statements outside of transactions are logged directly
-	op, err := c.builder.build(ctx, query, args)
+	mod, err := c.builder.build(ctx, query, args)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build database modification: %w", err)
 	}
-	if op != nil {
-		if err := c.logModification(ctx, *op); err != nil {
+	if mod != nil {
+		if err := c.logModification(ctx, *mod); err != nil {
 			return nil, fmt.Errorf("failed to log database modification: %w", err)
 		}
 	}
@@ -67,7 +67,7 @@ func (c *Conn) ExecContext(ctx context.Context, query string, args []driver.Name
 }
 
 // logModification inserts a single database modification directly into the database.
-func (c *Conn) logModification(ctx context.Context, op DatabaseModification) error {
+func (c *Conn) logModification(ctx context.Context, mod DatabaseModification) error {
 	execCtx, ok := c.Conn.(driver.ExecerContext)
 	if !ok {
 		return errors.New("connection does not support ExecContext for direct logging")
@@ -77,13 +77,13 @@ func (c *Conn) logModification(ctx context.Context, op DatabaseModification) err
 		ctx,
 		`INSERT INTO database_modifications (id, operator_id, execution_id, table_name, action, sql, modified_at) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		[]driver.NamedValue{
-			{Name: "id", Value: op.ID},
-			{Name: "operator_id", Value: op.OperatorID},
-			{Name: "execution_id", Value: op.ExecutionID},
-			{Name: "table_name", Value: op.TableName},
-			{Name: "action", Value: op.Action.String()},
-			{Name: "sql", Value: op.SQL},
-			{Name: "modified_at", Value: op.ModifiedAt},
+			{Name: "id", Value: mod.ID},
+			{Name: "operator_id", Value: mod.OperatorID},
+			{Name: "execution_id", Value: mod.ExecutionID},
+			{Name: "table_name", Value: mod.TableName},
+			{Name: "action", Value: mod.Action.String()},
+			{Name: "sql", Value: mod.SQL},
+			{Name: "modified_at", Value: mod.ModifiedAt},
 		},
 	)
 
@@ -110,7 +110,7 @@ func (tc *txConn) ExecContext(ctx context.Context, query string, args []driver.N
 		return execCtx.ExecContext(ctx, query, args)
 	}
 
-	op, err := tc.builder.build(ctx, query, args)
+	mod, err := tc.builder.build(ctx, query, args)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build database modification: %w", err)
 	}
@@ -119,8 +119,8 @@ func (tc *txConn) ExecContext(ctx context.Context, query string, args []driver.N
 	if err != nil {
 		return res, err
 	}
-	if op != nil {
-		tc.buf.add(*op)
+	if mod != nil {
+		tc.buf.add(*mod)
 	}
 
 	return res, nil
@@ -187,19 +187,19 @@ func (tx *loggingTx) log(modifications []DatabaseModification) error {
 	valuesClauses := make([]string, len(modifications))
 	args := make([]driver.NamedValue, 0, len(modifications)*7)
 
-	for i, op := range modifications {
+	for i, mod := range modifications {
 		baseIndex := i * 7
 		valuesClauses[i] = fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d, $%d)",
 			baseIndex+1, baseIndex+2, baseIndex+3, baseIndex+4, baseIndex+5, baseIndex+6, baseIndex+7)
 
 		args = append(args,
-			driver.NamedValue{Ordinal: baseIndex + 1, Value: op.ID},
-			driver.NamedValue{Ordinal: baseIndex + 2, Value: op.OperatorID},
-			driver.NamedValue{Ordinal: baseIndex + 3, Value: op.ExecutionID},
-			driver.NamedValue{Ordinal: baseIndex + 4, Value: op.TableName},
-			driver.NamedValue{Ordinal: baseIndex + 5, Value: op.Action.String()},
-			driver.NamedValue{Ordinal: baseIndex + 6, Value: op.SQL},
-			driver.NamedValue{Ordinal: baseIndex + 7, Value: op.ModifiedAt},
+			driver.NamedValue{Ordinal: baseIndex + 1, Value: mod.ID},
+			driver.NamedValue{Ordinal: baseIndex + 2, Value: mod.OperatorID},
+			driver.NamedValue{Ordinal: baseIndex + 3, Value: mod.ExecutionID},
+			driver.NamedValue{Ordinal: baseIndex + 4, Value: mod.TableName},
+			driver.NamedValue{Ordinal: baseIndex + 5, Value: mod.Action.String()},
+			driver.NamedValue{Ordinal: baseIndex + 6, Value: mod.SQL},
+			driver.NamedValue{Ordinal: baseIndex + 7, Value: mod.ModifiedAt},
 		)
 	}
 
