@@ -162,15 +162,13 @@ type loggingTx struct {
 func (tx *loggingTx) Commit() error {
 	modifications := tx.buf.drain()
 	if len(modifications) > 0 {
-		if err := tx.log(modifications); err != nil {
-			rollbackErr := tx.Rollback()
-			if rollbackErr != nil {
-				return fmt.Errorf("failed to rollback transaction after logging error: %w: %w", rollbackErr, err)
+		if err := tx.log(context.Background(), modifications); err != nil {
+			if rollbackErr := tx.Tx.Rollback(); rollbackErr != nil {
+				return fmt.Errorf("failed to rollback after audriver logging error: %v (original error: %w)", rollbackErr, err)
 			}
 			return fmt.Errorf("failed to flush logs in transaction: %w", err)
 		}
 	}
-
 	return tx.Tx.Commit()
 }
 
@@ -181,7 +179,7 @@ func (tx *loggingTx) Rollback() error {
 }
 
 // log inserts all buffered database modifications in a single batch operation.
-func (tx *loggingTx) log(modifications []DatabaseModification) error {
+func (tx *loggingTx) log(ctx context.Context, modifications []DatabaseModification) error {
 	if len(modifications) == 0 {
 		return nil
 	}
@@ -198,7 +196,6 @@ func (tx *loggingTx) log(modifications []DatabaseModification) error {
 		baseIndex := i * 7
 		valuesClauses[i] = fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d, $%d)",
 			baseIndex+1, baseIndex+2, baseIndex+3, baseIndex+4, baseIndex+5, baseIndex+6, baseIndex+7)
-
 		args = append(args,
 			driver.NamedValue{Ordinal: baseIndex + 1, Value: mod.ID},
 			driver.NamedValue{Ordinal: baseIndex + 2, Value: mod.OperatorID},
@@ -215,13 +212,13 @@ func (tx *loggingTx) log(modifications []DatabaseModification) error {
 		strings.Join(valuesClauses, ", "),
 	)
 
-	_, err := execCtx.ExecContext(context.Background(), query, args)
+	_, err := execCtx.ExecContext(ctx, query, args)
 	if err != nil {
-		return fmt.Errorf("failed to batch commitLogs database modifications: %w", err)
+		return fmt.Errorf("failed to batch insert database modifications: %w", err)
 	}
 
 	for _, mod := range modifications {
-		tx.logger.Log(context.Background(), mod)
+		tx.logger.Log(ctx, mod)
 	}
 
 	return nil
