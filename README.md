@@ -75,12 +75,12 @@ audriver supports various configuration options:
 
 ```go
 auditDriver := audriver.New(
-baseDriver,
-audriver.WithLogger(customLogger),
-audriver.WithIDGenerator(customIDGenerator),
-audriver.WithOperatorIDExtractor(customOperatorExtractor),
-audriver.WithExecutionIDExtractor(customExecutionExtractor),
-audriver.WithTableFilters(filters...),
+    baseDriver,
+    audriver.WithLogger(customLogger),
+    audriver.WithIDGenerator(customIDGenerator),
+    audriver.WithOperatorIDExtractor(customOperatorExtractor),
+    audriver.WithExecutionIDExtractor(customExecutionExtractor),
+    audriver.WithTableFilters(filters...),
 )
 ```
 
