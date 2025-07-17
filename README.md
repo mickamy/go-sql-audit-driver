@@ -76,10 +76,24 @@ audriver supports various configuration options:
 ```go
 auditDriver := audriver.New(
 baseDriver,
+audriver.WithLogger(customLogger),
 audriver.WithIDGenerator(customIDGenerator),
 audriver.WithOperatorIDExtractor(customOperatorExtractor),
 audriver.WithExecutionIDExtractor(customExecutionExtractor),
 audriver.WithTableFilters(filters...),
+)
+```
+
+### Custom Logger
+
+```go
+type CustomLogger struct{}
+func (l *CustomLogger) Log(ctx context.Context, mod audriver.DatabaseModification) {
+    log.Printf("Audit Log: %s %s %s %s", mod.OperatorID, mod.TableName, mod.Action, mod.SQL)
+}
+auditDriver := audriver.New(
+	baseDriver,
+	audriver.WithLogger(&CustomLogger{}),
 )
 ```
 
@@ -89,11 +103,12 @@ audriver.WithTableFilters(filters...),
 type CustomIDGenerator struct{}
 
 func (g *CustomIDGenerator) GenerateID() string {
-return "custom-" + uuid.New().String()
+    return "custom-" + uuid.New().String()
 }
 
-auditDriver := audriver.New(baseDriver,
-audriver.WithIDGenerator(&CustomIDGenerator{}),
+auditDriver := audriver.New(
+	baseDriver,
+    audriver.WithIDGenerator(&CustomIDGenerator{}),
 )
 ```
 
@@ -101,14 +116,15 @@ audriver.WithIDGenerator(&CustomIDGenerator{}),
 
 ```go
 customOperatorExtractor := audriver.OperatorIDExtractorFunc(func (ctx context.Context) (string, error) {
-if userID := ctx.Value("current_user_id"); userID != nil {
-return userID.(string), nil
-}
-return "", fmt.Errorf("user ID not found in context")
+    if userID := ctx.Value("current_user_id"); userID != nil {
+        return userID.(string), nil
+    }
+    return "", fmt.Errorf("user ID not found in context")
 })
 
-auditDriver := audriver.New(baseDriver,
-audriver.WithOperatorIDExtractor(customOperatorExtractor),
+auditDriver := audriver.New(
+	baseDriver,
+	audriver.WithOperatorIDExtractor(customOperatorExtractor),
 )
 ```
 
@@ -121,8 +137,9 @@ excludeFilter := audriver.NewExcludePrefixFilter("temp_", "log_")
 // Include only specific tables
 includeFilter := audriver.NewIncludePatternFilter("users", "orders", "products")
 
-auditDriver := audriver.New(baseDriver,
-audriver.WithTableFilters(excludeFilter, includeFilter),
+auditDriver := audriver.New(
+	baseDriver, 
+	audriver.WithTableFilters(excludeFilter, includeFilter),
 )
 ```
 
