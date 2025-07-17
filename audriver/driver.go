@@ -6,6 +6,13 @@ import (
 
 type Option func(*Driver)
 
+// WithLogger sets the logger for database modifications.
+func WithLogger(logger Logger) Option {
+	return func(d *Driver) {
+		d.logger = logger
+	}
+}
+
 // WithIDGenerator sets the ID generator for database modifications.
 func WithIDGenerator(gen IDGenerator) Option {
 	return func(d *Driver) {
@@ -45,6 +52,7 @@ type Driver struct {
 	driver.Driver
 	builder  *databaseModificationBuilder
 	readOnly bool
+	logger   Logger
 }
 
 // NewDriver creates a new audit driver from a driver.Driver
@@ -84,6 +92,10 @@ func newAuditDriver(d driver.Driver, options ...Option) driver.Driver {
 
 	drv.builder.fillDefaults()
 
+	if drv.logger == nil {
+		drv.logger = &noopLogger{}
+	}
+
 	return drv
 }
 
@@ -92,7 +104,7 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Conn{Conn: conn, builder: d.builder, readOnly: d.readOnly}, nil
+	return &Conn{Conn: conn, builder: d.builder, readOnly: d.readOnly, logger: d.logger}, nil
 }
 
 var (

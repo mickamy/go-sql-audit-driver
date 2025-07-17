@@ -12,6 +12,7 @@ type Conn struct {
 	driver.Conn
 	builder  *databaseModificationBuilder
 	readOnly bool
+	logger   Logger
 }
 
 func (c *Conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
@@ -36,7 +37,8 @@ func (c *Conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, e
 			builder:  c.builder,
 			readOnly: c.readOnly,
 		},
-		buf: buf,
+		buf:    buf,
+		logger: c.logger,
 	}, nil
 }
 
@@ -86,6 +88,10 @@ func (c *Conn) logModification(ctx context.Context, mod DatabaseModification) er
 			{Name: "modified_at", Value: mod.ModifiedAt},
 		},
 	)
+
+	if err != nil {
+		c.logger.Log(ctx, mod)
+	}
 
 	return err
 }
@@ -147,8 +153,9 @@ func (tc *txConn) PrepareContext(ctx context.Context, query string) (driver.Stmt
 // loggingTx is a wrapper around driver.Tx that logs database modifications within a transaction.
 type loggingTx struct {
 	driver.Tx
-	conn *txConn
-	buf  *buffer
+	conn   *txConn
+	buf    *buffer
+	logger Logger
 }
 
 // Commit commits the transaction and flushes any buffered logs to the database.
@@ -211,6 +218,10 @@ func (tx *loggingTx) log(modifications []DatabaseModification) error {
 	_, err := execCtx.ExecContext(context.Background(), query, args)
 	if err != nil {
 		return fmt.Errorf("failed to batch commitLogs database modifications: %w", err)
+	}
+
+	for _, mod := range modifications {
+		tx.logger.Log(context.Background(), mod)
 	}
 
 	return nil
