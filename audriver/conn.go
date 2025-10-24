@@ -30,7 +30,8 @@ func (c *Conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, e
 	}
 
 	return &loggingTx{
-		Tx: tx,
+		_ctx: ctx,
+		Tx:   tx,
 		conn: &txConn{
 			Conn:     c.Conn,
 			buf:      buf,
@@ -152,23 +153,38 @@ func (tc *txConn) PrepareContext(ctx context.Context, query string) (driver.Stmt
 
 // loggingTx is a wrapper around driver.Tx that logs database modifications within a transaction.
 type loggingTx struct {
+	_ctx context.Context
 	driver.Tx
 	conn   *txConn
 	buf    *buffer
 	logger Logger
 }
 
+func (tx *loggingTx) ctx() context.Context {
+	if tx._ctx != nil {
+		return tx._ctx
+	}
+	return context.Background()
+}
+
 // Commit commits the transaction and flushes any buffered logs to the database.
 func (tx *loggingTx) Commit() error {
 	modifications := tx.buf.drain()
+	ctx := tx.ctx()
 	if len(modifications) > 0 {
-		if err := tx.log(context.Background(), modifications); err != nil {
+		if err := tx.log(ctx, modifications); err != nil {
 			if rollbackErr := tx.Tx.Rollback(); rollbackErr != nil {
 				return fmt.Errorf("failed to rollback after audriver logging error: %v (original error: %w)", rollbackErr, err)
 			}
 			return fmt.Errorf("failed to flush logs in transaction: %w", err)
 		}
 	}
+
+	if err := ctx.Err(); err != nil {
+		_ = tx.Tx.Rollback()
+		return err
+	}
+
 	return tx.Tx.Commit()
 }
 
